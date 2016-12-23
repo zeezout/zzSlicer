@@ -1,5 +1,5 @@
-#An STL to Gcode Slicer written in C# #
-Slices STL to Gcode for 3D printers. Specifically designed for thin vertical walls, for example to print wings of a model airplane.
+#zzSlicer
+Slices STL to Gcode for 3D printers. Prints the STL file as it is, without additions or ommisions. Designed for printing thin vertical walls, for example to print the wings of a model airplane.
 
 ##Features
 * Reads ASCII or Binary STL files
