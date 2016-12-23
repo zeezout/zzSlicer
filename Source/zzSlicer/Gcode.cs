@@ -4,8 +4,19 @@ using System.Text;
 
 class Gcode
 {
-    //float extruder_diameter = 0.4f;
     private float filament_diameter = 1.75f;
+    public float f0 = 9000; //speed for G0 commands in mm/min
+    public float f1 = 1200; //speed for G1 commands in mm/min
+    public float printtime_minutes; //total print time in minutes
+    public float distance_g1; //total print distance in mm
+    public float distance_g0; //total transfer distance in mm
+    public bool PrintPerimeter = true; //print perimeter around object
+    public Vector2F pos = new Vector2F(0, 0); //current xy position in mm
+    public float z = 0; //current z position in mm
+    public float e = 0; //filament length feeded in mm
+
+    StringBuilder gcode = new StringBuilder(1000000); //generated gcode
+
     public float FilamentDiameter
     {
         get { return filament_diameter; }
@@ -29,9 +40,13 @@ class Gcode
         e_per_mm = (z_step * wall_thickness) / ((filament_diameter / 2) * (filament_diameter / 2) * (float)Math.PI);
     }
 
-    //Kossel specs: move 150mm/sec = 9000mm/min, print 20-80mm/sec = 1200-4800mm/min
-    public float f0 = 9000; //speed for G0 commands in mm/min
-    public float f1 = 1200; //speed for G1 commands in mm/min
+
+
+    public float PrintSpeed
+    {
+        get { return f1 / 60; }
+        set { f1 = value * 60; }
+    }
 
     public string header = @";==============================================================
 ; START header
@@ -73,12 +88,7 @@ M107                          ;Fan Off
 ;==============================================================
 ;END footer
 ;==============================================================";
-    public float x = 0;
-    public float y = 0;
-    public float z = 0;
-    public float e = 0;
 
-    StringBuilder gcode = new StringBuilder(1000000);
 
     public float FilamentUsageCc
     {
@@ -92,13 +102,16 @@ M107                          ;Fan Off
 
     public void Append(Slices slices)
     {
-        //perimeter
+
         tz(0);
-        txy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymin - 6));
-        mxy(new Vector2F(slices.mesh.xmax + 6, slices.mesh.ymin - 6));
-        mxy(new Vector2F(slices.mesh.xmax + 6, slices.mesh.ymax + 6));
-        mxy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymax + 6));
-        mxy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymin - 6));
+        if (PrintPerimeter)
+        { 
+            txy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymin - 6));
+            mxy(new Vector2F(slices.mesh.xmax + 6, slices.mesh.ymin - 6));
+            mxy(new Vector2F(slices.mesh.xmax + 6, slices.mesh.ymax + 6));
+            mxy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymax + 6));
+            mxy(new Vector2F(slices.mesh.xmin - 6, slices.mesh.ymin - 6));
+        }
         foreach (Slice s in slices.slices) Append(s);
     }
 
@@ -117,53 +130,85 @@ M107                          ;Fan Off
         }
     }
 
-    public void save(string filename)
+    public string info()
     {
-        string info = string.Format(";Filament usage: {0:0.00} m, {1:0.0} cc, {2:0.0} gram PLA, {3:0.0} gram PLA\n", e / 1000, FilamentUsageCc, FilamentUsageCc * 1.27, FilamentUsageCc * 1.05);
-        info += string.Format(";Filament diameter: {0} mm\n", filament_diameter);
-        info += string.Format(";Wall thickness: {0} mm\n", wall_thickness);
-        info += string.Format(";Feed speed: {0}\n", f1);
-        info += string.Format(";Created on: {0}\n", DateTime.Now);
-        System.IO.File.WriteAllText(filename, info + "\n" + header + "\n" + gcode + footer + "\n");
+        string s = "";
+        s += string.Format(";Filament usage {0:0.00} m\n", e / 1000);
+        s += string.Format(";Filament PLA   {0:0.0} gr\n",  FilamentUsageCc * 1.27);
+        s += string.Format(";Filament ABS   {0:0.0} gr\n",  FilamentUsageCc * 1.05);
+        s += string.Format(";Print time     {0:0.0} min\n", printtime_minutes);
+        s += string.Format(";Movement G1    {0:0.0} m\n", distance_g1/1000);
+        s += string.Format(";Movement G0    {0:0.0} m\n", distance_g0 / 1000);
+        s += string.Format(";Filament diam. {0:0.00} mm\n", filament_diameter);
+        s += string.Format(";Wall thickness {0:0.00} mm\n", wall_thickness);
+        s += string.Format(";Print speed    {0:0.} mm/sec\n", f1/60);
+        s += string.Format(";Created on     {0}\n", DateTime.Now);
+        return s;
+    }
+
+    public void save(string filename)
+    {        
+        System.IO.File.WriteAllText(filename, info() + "\n" + header + "\n" + gcode + footer + "\n");
     }
 
     #region Low level gcode output
+    //transfer to xy
+    public void txy(Vector2F v)
+    {
+        float d = Vector2F.Distance(pos, v);
+        distance_g0 += d;
+        printtime_minutes += d / f0;
+        pos = v;
+        g("G0 X{0:0.###} Y{1:0.###} F{2:0.###}", pos.X, pos.Y, f0);
+    }
+
+    //transfer to xy
     public void txy(float new_x, float new_y)
     {
-        x = new_x;
-        y = new_y;
-        g("G0 X{0:0.###} Y{1:0.###} F{2:0.###}", x, y, f0);
+        txy(new Vector2F(new_x, new_y));
     }
 
+    //move to xy
+    public void mxy(Vector2F v)
+    {
+        float d = Vector2F.Distance(pos, v);
+        distance_g1 += d;
+        printtime_minutes += d / f1;
+        pos = v;
+        e += e_per_mm * d;
+        g("G1 X{0:0.###} Y{1:0.###} E{2:0.#####} F{3:0.###}", pos.X, pos.Y, e, f1);
+        
+    }
+
+    //move to xy
     public void mxy(float new_x, float new_y)
     {
-        e += e_per_mm * (float)Math.Sqrt((x - new_x) * (x - new_x) + (y - new_y) * (y - new_y));
-        x = new_x;
-        y = new_y;
-        g("G1 X{0:0.###} Y{1:0.###} E{2:0.#####} F{3:0.###}", x, y, e, f1);
+        mxy(new Vector2F(new_x, new_y));
     }
 
+    //move to z
     public void mz(float new_z)
     {
         z = new_z;
+        float d = (float)Math.Abs(new_z-z);
+        distance_g1 += d;
+        printtime_minutes += d / f1;
         g("G1 Z{0:0.###} F{1:0.###}", z, f1);
     }
 
+    //transfer to z
     public void tz(float new_z)
     {
         z = new_z;
+        float d = (float)Math.Abs(new_z - z);
+        distance_g0 += d;
+        printtime_minutes += d / f0;
         g("G0 Z{0:0.###} F{1:0.###}", z, f0);
     }
 
-    public void txy(Vector2F v)
-    {
-        txy(v.X, v.Y);
-    }
 
-    public void mxy(Vector2F v)
-    {
-        mxy(v.X, v.Y);
-    }
+
+
 
     public void g(string msg, params object[] args)
     {

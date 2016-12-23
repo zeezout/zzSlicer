@@ -105,7 +105,6 @@ public class Mesh
 
 }
 
-
 public class Segment
 {
     public Vector2F[] p;
@@ -161,16 +160,16 @@ public class Slice
     public List<SegmentPath> paths;
     public float z;
 
-    public Slice(IList<Facet> facets, float z, float tol)
+    public Slice(IList<Facet> facets, float z, float tol, float z_angle)
     {
         this.z = z;
-        LinkedList<Segment> segments = slice_facets_to_segments(facets, z); //find segments for slice
+        LinkedList<Segment> segments = slice_facets_to_segments(facets, z,z_angle); //find segments for slice
         paths = slice_segments_to_paths(segments, tol); //combine segments to paths
         foreach (SegmentPath path in paths) path.Reduce(tol); //remove redundant points on path
     }
 
     //find segments for slice
-    private LinkedList<Segment> slice_facets_to_segments(IList<Facet> facets, float z)
+    private LinkedList<Segment> slice_facets_to_segments(IList<Facet> facets, float z, float z_angle)
     {
         LinkedList<Segment> segments = new LinkedList<Segment>();
         foreach (Facet f in facets)
@@ -197,16 +196,12 @@ public class Slice
             //QQQ
             //segments.AddLast(s);
 
-            if (f.z_angle < (float)Math.PI / 4)
+            if (f.z_angle < z_angle)
             {
                 Vector2F Normal = Vector2F.Normal(s.p[0] - s.p[1]);
                 float separation = 0.5f;
                 Segment s1 = new Segment(new Vector2F(s.p[0] + (separation / 2) * Normal), new Vector2F(s.p[1] + (separation / 2) * Normal));
                 segments.AddLast(s1);
-                if(float.IsNaN(s1.p[0].X) || float.IsNaN(s.p[1].X))
-                {
-                    Console.WriteLine("EE");
-                }
                 Segment s2 = new Segment(new Vector2F(s.p[0] - (separation / 2) * Normal), new Vector2F(s.p[1] - (separation / 2) * Normal));
                 segments.AddLast(s2);
             }
@@ -355,21 +350,30 @@ public class Slices
     public Mesh mesh;
     public float zstep;
     public float tol;
+    public float z_angle = (float)Math.PI / 4; //print two lines when angle between normal and z-axis is smaller than z_angle
 
-    public Slices(Mesh mesh, float zstep, float tol)
+    public Slices(Mesh mesh, float zstep, float tol, float z_angle)
     {
         this.mesh = mesh;
-        Slice(zstep, tol);
-    }
-
-    public void Slice(float zstep, float tol)
-    {
         this.zstep = zstep;
         this.tol = tol;
+        this.z_angle = z_angle;
+        Slice();
+    }
+
+    public int LineSegmentCount()
+    {
+        int cnt = 0;
+        foreach (Slice s in slices) foreach (SegmentPath p in s.paths) cnt += p.p.Count - 1;
+        return cnt;
+    }
+
+    public void Slice()
+    {
         slices = new List<Slice>();
         for (float z = mesh.zmin; z <= mesh.zmax; z += zstep)
         {
-            slices.Add(new Slice(mesh.Facets, z, tol));
+            slices.Add(new Slice(mesh.Facets, z, tol, z_angle));
         }
         Vector2F current_head_pos = new Vector2F(0, 0);
         OptimizePaths(ref current_head_pos);
