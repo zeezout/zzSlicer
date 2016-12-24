@@ -15,7 +15,7 @@ class Gcode
     public float z = 0; //current z position in mm
     public float e = 0; //filament length feeded in mm
 
-    StringBuilder gcode = new StringBuilder(1000000); //generated gcode
+    StringBuilder gcode = new StringBuilder(8000000); //generated gcode
 
     public float FilamentDiameter
     {
