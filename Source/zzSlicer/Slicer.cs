@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using QuantumConcepts.Formats.StereoLithography;
+using System.Diagnostics;
 
 public struct Facet
 {
@@ -16,6 +17,47 @@ public struct Facet
         z_angle = Vector3F.AngleBetween(Vector3F.UnitZ, Normal);
         if (z_angle > (float)Math.PI / 2) z_angle = (float)Math.PI - z_angle;
     }
+
+    public float zmin()
+    {
+        float zmin = Vertices[0].Z;
+        if (zmin > Vertices[1].Z) zmin = Vertices[1].Z;
+        if (zmin > Vertices[2].Z) zmin = Vertices[2].Z;
+        return zmin;
+    }
+
+    public float zmax()
+    {
+        float zmax = Vertices[0].Z;
+        if (zmax < Vertices[1].Z) zmax = Vertices[1].Z;
+        if (zmax < Vertices[2].Z) zmax = Vertices[2].Z;
+        return zmax;
+    }
+
+    //intersect facet with horizontal plane at z
+    public bool IntersectHorizontalPlane(float z, ref Segment s)
+    { 
+            int a, b, c;
+            for (a = 0; a< 3 && Vertices[a].Z> z; a++) ;
+            if (a == 3) return false;  // all below
+            for (b = 0; b< 3 && Vertices[b].Z <= z; b++) ;
+            if (b == 3) return false;  // all above
+
+            s = new Segment();
+            // Line from vertex a->b is one facet... find point. Note a<=z and b>z
+            s.p[0].X = Vertices[a].X + (Vertices[b].X - Vertices[a].X) * (z - Vertices[a].Z) / (Vertices[b].Z - Vertices[a].Z);
+            s.p[0].Y = Vertices[a].Y + (Vertices[b].Y - Vertices[a].Y) * (z - Vertices[a].Z) / (Vertices[b].Z - Vertices[a].Z);
+
+            // Line a->c or c->b is another facet... find point
+            for (c = 0; c == a || c == b; c++) ;
+            if (Vertices[c].Z <= z) a = c; else b = c;
+            s.p[1].X = Vertices[a].X + (Vertices[b].X - Vertices[a].X) * (z - Vertices[a].Z) / (Vertices[b].Z - Vertices[a].Z);
+            s.p[1].Y = Vertices[a].Y + (Vertices[b].Y - Vertices[a].Y) * (z - Vertices[a].Z) / (Vertices[b].Z - Vertices[a].Z);
+
+            if (s.p[0] == s.p[1]) return false; //ignore single points
+        return true;
+    }
+
 }
 
 public class Mesh
@@ -157,151 +199,14 @@ public class SegmentPath
 
 public class Slice
 {
-    public List<SegmentPath> paths;
     public float z;
+    public List<Segment> segments;
+    public List<SegmentPath> paths;
 
-    public Slice(IList<Facet> facets, float z, float tol, float z_angle)
+    public Slice( float z)
     {
         this.z = z;
-        LinkedList<Segment> segments = slice_facets_to_segments(facets, z,z_angle); //find segments for slice
-        paths = slice_segments_to_paths(segments, tol); //combine segments to paths
-        foreach (SegmentPath path in paths) path.Reduce(tol); //remove redundant points on path
-    }
-
-    //find segments for slice
-    private LinkedList<Segment> slice_facets_to_segments(IList<Facet> facets, float z, float z_angle)
-    {
-        LinkedList<Segment> segments = new LinkedList<Segment>();
-        foreach (Facet f in facets)
-        {
-            int a, b, c;
-            for (a = 0; a < 3 && f.Vertices[a].Z > z; a++) ;
-            if (a == 3) continue;  // all below
-            for (b = 0; b < 3 && f.Vertices[b].Z <= z; b++) ;
-            if (b == 3) continue;  // all above
-
-            Segment s = new Segment();
-            // Line from vertex a->b is one facet... find point. Note a<=z and b>z
-            s.p[0].X = f.Vertices[a].X + (f.Vertices[b].X - f.Vertices[a].X) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-            s.p[0].Y = f.Vertices[a].Y + (f.Vertices[b].Y - f.Vertices[a].Y) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-
-            // Line a->c or c->b is another facet... find point
-            for (c = 0; c == a || c == b; c++) ;
-            if (f.Vertices[c].Z <= z) a = c; else b = c;
-            s.p[1].X = f.Vertices[a].X + (f.Vertices[b].X - f.Vertices[a].X) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-            s.p[1].Y = f.Vertices[a].Y + (f.Vertices[b].Y - f.Vertices[a].Y) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-
-            if (s.p[0] == s.p[1]) continue; //ignore single points
-
-            //QQQ
-            //segments.AddLast(s);
-
-            if (f.z_angle < z_angle)
-            {
-                Vector2F Normal = Vector2F.Normal(s.p[0] - s.p[1]);
-                float separation = 0.5f;
-                Segment s1 = new Segment(new Vector2F(s.p[0] + (separation / 2) * Normal), new Vector2F(s.p[1] + (separation / 2) * Normal));
-                segments.AddLast(s1);
-                Segment s2 = new Segment(new Vector2F(s.p[0] - (separation / 2) * Normal), new Vector2F(s.p[1] - (separation / 2) * Normal));
-                segments.AddLast(s2);
-            }
-            else
-            {
-                segments.AddLast(s);
-            }
-
-        //QQQ
-
-    }
-        return segments;
-    }
-
-    //find segments for slice (Version 1)
-    // - does not handle at all: horizontal planes, don't get printed at all
-    // - does not handle well: 'nearly' horizontal planes, gets printed too thin
-    private LinkedList<Segment> slice_facets_to_segments_v1(IList<Facet> facets, float z)
-    {
-        LinkedList<Segment> segments = new LinkedList<Segment>();
-        foreach (Facet f in facets)
-        {
-            int a, b, c;
-            for (a = 0; a < 3 && f.Vertices[a].Z > z; a++) ;
-            if (a == 3) continue;  // all below
-            for (b = 0; b < 3 && f.Vertices[b].Z <= z; b++) ;
-            if (b == 3) continue;  // all above
-
-            Segment s = new Segment();
-            // Line from vertex a->b is one facet... find point. Note a<=z and b>z
-            s.p[0].X = f.Vertices[a].X + (f.Vertices[b].X - f.Vertices[a].X) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-            s.p[0].Y = f.Vertices[a].Y + (f.Vertices[b].Y - f.Vertices[a].Y) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-
-            // Line a->c or c->b is another facet... find point
-            for (c = 0; c == a || c == b; c++) ;
-            if (f.Vertices[c].Z <= z) a = c; else b = c;
-            s.p[1].X = f.Vertices[a].X + (f.Vertices[b].X - f.Vertices[a].X) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-            s.p[1].Y = f.Vertices[a].Y + (f.Vertices[b].Y - f.Vertices[a].Y) * (z - f.Vertices[a].Z) / (f.Vertices[b].Z - f.Vertices[a].Z);
-
-            if (s.p[0] == s.p[1]) continue; //ignore single points
-
-            segments.AddLast(s);
-        }
-        return segments;
-    }
-
-    //combine segments to paths
-    private List<SegmentPath> slice_segments_to_paths(LinkedList<Segment> segments, float tol = 1e-10f)
-    {
-        //combine segments into polygons
-        float tol2 = tol * tol;
-
-        List<SegmentPath> pols = new List<SegmentPath>();
-
-        while (segments.Count > 0)
-        {
-            SegmentPath pol = new SegmentPath(segments.First.Value.p);
-            pols.Add(pol);
-            segments.Remove(segments.First);
-            Vector2F v1 = pol.p.First.Value;
-            Vector2F v2 = pol.p.Last.Value;
-            LinkedListNode<Segment> sn = segments.First;
-            while (sn != null)
-            {
-                if (Vector2F.DistanceSquared(v1, sn.Value.p[0]) < tol2)
-                {
-                    pol.p.AddFirst(sn.Value.p[1]);
-                    segments.Remove(sn);
-                    v1 = pol.p.First.Value;
-                    sn = segments.First;
-                    continue;
-                }
-                if (Vector2F.DistanceSquared(v1, sn.Value.p[1]) < tol2)
-                {
-                    pol.p.AddFirst(sn.Value.p[0]);
-                    segments.Remove(sn);
-                    v1 = pol.p.First.Value;
-                    sn = segments.First;
-                    continue;
-                }
-                if (Vector2F.DistanceSquared(v2, sn.Value.p[0]) < tol2)
-                {
-                    pol.p.AddLast(sn.Value.p[1]);
-                    segments.Remove(sn);
-                    v2 = pol.p.Last.Value;
-                    sn = segments.First;
-                    continue;
-                }
-                if (Vector2F.DistanceSquared(v2, sn.Value.p[1]) < tol2)
-                {
-                    pol.p.AddLast(sn.Value.p[0]);
-                    segments.Remove(sn);
-                    v2 = pol.p.Last.Value;
-                    sn = segments.First;
-                    continue;
-                }
-                sn = sn.Next;
-            }
-        }
-        return pols;
+        segments = new List<Segment>();
     }
 
     //find closest endpoint to point
@@ -358,7 +263,7 @@ public class Slices
         this.zstep = zstep;
         this.tol = tol;
         this.z_angle = z_angle;
-        Slice();
+        Slicer();
     }
 
     public int LineSegmentCount()
@@ -368,15 +273,169 @@ public class Slices
         return cnt;
     }
 
-    public void Slice()
+    public void Slicer()
     {
+        Stopwatch sw = Stopwatch.StartNew();
         slices = new List<Slice>();
         for (float z = mesh.zmin; z <= mesh.zmax; z += zstep)
         {
-            slices.Add(new Slice(mesh.Facets, z, tol, z_angle));
+            slices.Add(new Slice(z));
         }
+        Segment seg = null;
+        foreach (Facet f in mesh.Facets)
+        {
+            int layer_start = (int)((f.zmin()-mesh.zmin) / zstep);
+            int layer_end = (int)((f.zmax() - mesh.zmin) / zstep);
+            for (int layer = layer_start; layer <= layer_end; layer++)
+            {
+                float z = mesh.zmin + zstep * layer;
+                if (f.IntersectHorizontalPlane(z,ref seg))
+                {
+                    slices[layer].segments.Add(seg);
+                }
+            }
+        }
+        Console.WriteLine("slicer: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
+
+        foreach (Slice slc in slices)
+        {
+            slc.paths = segments_to_paths(slc.segments, tol); //combine segments to paths
+        }
+        Console.WriteLine("segments_to_paths: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
+
+        foreach (Slice slc in slices)
+        {
+            foreach (SegmentPath path in slc.paths) path.Reduce(tol); //remove redundant points on path
+        }
+        Console.WriteLine("path.Reduce: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
+
         Vector2F current_head_pos = new Vector2F(0, 0);
         OptimizePaths(ref current_head_pos);
+        Console.WriteLine("optimize paths: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
+    }
+
+    private class SegmentTilePoint
+    {
+        public int seg_i;
+        public Vector2F p;
+        public SegmentTilePoint othersegidx;
+        public bool alive = true;
+        public SegmentTilePoint(int seg_i, Vector2F p, SegmentTilePoint othersegidx)
+        {
+            this.seg_i = seg_i;
+            this.p = p;
+            this.othersegidx = othersegidx;
+        }
+    }
+
+    //combine segments to paths
+    //algorithm: make a tiled index with the endpoints of the segments
+    //for each segment search in the tile and neighboring tiles for matches
+    public static List<SegmentPath> segments_to_paths(List<Segment> segments, float tol = 1e-10f)
+    {
+        List<SegmentPath> paths = new List<SegmentPath>();
+
+        //create SegmentTiles
+        int tileLen = 30; //number of tiles per row/column
+        Segment[] segs = segments.ToArray();
+        float xmin = float.MaxValue;
+        float ymin = float.MaxValue;
+        float xmax = float.MinValue;
+        float ymax = float.MinValue;
+        foreach (Segment s in segs)
+        {
+            foreach (Vector2F v in s.p)
+            {
+                if (xmin > v.X) xmin = v.X;
+                if (xmax < v.X) xmax = v.X;
+                if (ymin > v.Y) ymin = v.Y;
+                if (ymax < v.Y) ymax = v.Y;
+            }
+        }
+        float xstep = (xmax - xmin)/ tileLen;
+        float ystep = (ymax - ymin)/ tileLen;  
+        List<SegmentTilePoint>[] segTiles = new List<SegmentTilePoint>[(tileLen+2)* (tileLen+2)]; //add extra row/column around perimeter
+        for (int i = 0; i < (tileLen + 2) * (tileLen + 2); i++) segTiles[i] = new List<SegmentTilePoint>();
+        SegmentTilePoint[] sidx = new SegmentTilePoint[2];
+        for (int seg_i= 0;seg_i< segs.Length;seg_i++)
+        {
+            Segment s = segs[seg_i];
+            for (int j = 0; j < 2; j++)
+            {
+                int idx_x = (int)((s.p[j].X - xmin) / xstep);
+                int idx_y = (int)((s.p[j].Y - ymin) / ystep);
+                int idx = (idx_y + 1) * tileLen + (idx_x + 1);
+                sidx[j] = new SegmentTilePoint(seg_i, s.p[j], null);
+                segTiles[idx].Add(sidx[j]);
+            }
+            sidx[0].othersegidx = sidx[1];
+            sidx[1].othersegidx = sidx[0];
+        }
+
+        //array near defines the tile offsets to: current tile, left-above, above, right-above, left, right, left-below, below, right-below
+        int[] near = new int[] { 0, -tileLen - 1, -tileLen, -tileLen + 1, -1, 1, tileLen - 1, tileLen, tileLen + 1 };
+
+        //process each segment
+        for(int seg_i = 0; seg_i < segs.Length; seg_i++)
+        {
+            Segment seg = segs[seg_i];
+            if (seg == null) continue;
+            segs[seg_i] = null;
+            SegmentPath path = new SegmentPath(seg.p);
+            paths.Add(path);
+            //find poins that match the end of the path
+            bool pointadded;
+            do
+            {
+                pointadded = false;
+                Vector2F pathendpoint = path.p.Last.Value;
+                int idx_x = (int)((pathendpoint.X - xmin) / xstep);
+                int idx_y = (int)((pathendpoint.Y - ymin) / ystep);
+                int idx = (idx_y + 1) * tileLen + (idx_x + 1);
+                for (int near_i = 0; !pointadded && near_i < 9; near_i++)
+                {
+                    List<SegmentTilePoint> sgidx = segTiles[idx + near[near_i]];
+                    foreach (SegmentTilePoint si in sgidx)
+                    {
+                        if (si.alive && Vector2F.DistanceManhattan(pathendpoint, si.p) < tol)
+                        {
+                            path.p.AddLast(si.othersegidx.p);
+                            si.alive = false;
+                            si.othersegidx.alive = false;
+                            segs[si.seg_i] = null;
+                            pointadded = true;
+                            break;
+                        }
+                    }
+                }
+            } while (pointadded);
+            //find poins that match the beginning of the path
+            do
+            {
+                pointadded = false;
+                Vector2F pathbeginpoint = path.p.First.Value;
+                int idx_x = (int)((pathbeginpoint.X - xmin) / xstep);
+                int idx_y = (int)((pathbeginpoint.Y - ymin) / ystep);
+                int idx = (idx_y + 1) * tileLen + (idx_x + 1);
+                for (int near_i = 0; !pointadded && near_i < 9; near_i++)
+                {
+                    List<SegmentTilePoint> sgidx = segTiles[idx + near[near_i]];
+                    foreach (SegmentTilePoint si in sgidx)
+                    {
+                        if (si.alive && Vector2F.DistanceManhattan(pathbeginpoint, si.p) < tol)
+                        {
+                            path.p.AddFirst(si.othersegidx.p);
+                            si.alive = false;
+                            si.othersegidx.alive = false;
+                            segs[si.seg_i] = null;
+                            pointadded = true;
+                            break;
+                        }
+                    }
+                }
+            } while (pointadded);
+        }
+        return paths;
     }
 
     //Optimize print head travel by reordering/reversing paths

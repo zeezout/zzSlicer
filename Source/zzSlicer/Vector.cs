@@ -357,6 +357,10 @@ public struct Vector2F
     {
         return (a - b).Length;
     }
+    public static float DistanceManhattan(Vector2F a, Vector2F b) 
+    {
+        return Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+    }
 
     // Test whether two line segments intersect. If so, calculate the intersection point.
     // p Vector to the start point of p.</param>

@@ -7,7 +7,7 @@
 ;Filament diam. 1.75 mm
 ;Wall thickness 0.50 mm
 ;Print speed    30 mm/sec
-;Created on     23.12.2016 17:56:47
+;Created on     24.12.2016 00:57:12
 
 ;==============================================================
 ; START header

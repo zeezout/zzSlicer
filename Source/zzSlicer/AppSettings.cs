@@ -19,7 +19,7 @@ public class AppSettings
         foreach(PropertyInfo pi in GetType().GetProperties())
         {
             //Console.WriteLine(pi.Name + " = " + pi.GetValue(this) + " last=" + pi.GetValue(last_saved_version));
-            if (pi.GetValue(this) != pi.GetValue(last_saved_version)) return true;
+            if (pi.GetValue(this).ToString() != pi.GetValue(last_saved_version).ToString()) return true;
         }
         return false;   
     }

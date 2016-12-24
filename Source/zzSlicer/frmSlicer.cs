@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
+using System.Diagnostics;
 
 
 namespace STLtest
@@ -31,18 +32,20 @@ namespace STLtest
 
         private void frmSlicer_Shown(object sender, EventArgs e)
         {
-            string file = "die";
+            //string file = "die";
             //string file = "fuselage_crude";
             //string file = "house1";
             //string file = "servo";
             //string file = "wing_sd7037-1_6vertical";
-            //string file = "sd7037-1";
+            string file = "sd7037-1";
 
             string dir = Application.StartupPath + @"\..\..\..\..\Models\";
             string stl_file = dir + file + ".stl";
             string gcode_file = dir + file + ".gcode";
             if (LoadStlFile(stl_file)) SaveGcodeFile(gcode_file);
         }
+
+
 
         private bool LoadStlFile(string filename)
         {
@@ -60,16 +63,21 @@ namespace STLtest
             int ydiv = 8;
 
             //slice
+            Stopwatch sw = Stopwatch.StartNew();
             Mesh mesh = new Mesh(filename);
+            Console.WriteLine("load stl: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
             mesh.ShiftCenter();
             mesh.Scale(appset.stl_scale);
+            Console.WriteLine("shift/scale stl: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
             //float zstep = (mesh.zmax - mesh.zmin) / (xdiv * ydiv);
             float zstep = appset.zstep;
             slices = new Slices(mesh, zstep, appset.slice_tol, appset.z_angle*(float)Math.PI/180f);
+            Console.WriteLine("total slicing: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
 
             //visualize
             Visualize vis = new Visualize(w, h);
             pictureBox1.Image = vis.show_Slices(slices, xdiv, ydiv);
+            Console.WriteLine("visualize: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
 
             //gcode
             gcode = new Gcode();
@@ -81,6 +89,7 @@ namespace STLtest
             gcode.PrintSpeed = appset.PrintSpeed;
             gcode.PrintPerimeter = appset.PrintPerimeter;
             gcode.Append(slices);
+            Console.WriteLine("gcode: {0} ms", sw.ElapsedMilliseconds); sw.Restart();
 
             //show info
             txtInfo.Text =
